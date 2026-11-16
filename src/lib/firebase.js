@@ -1,7 +1,12 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
-import { getDatabase, ref, onValue, goOffline, goOnline } from "firebase/database";
+import { getFirestore } from "firebase/firestore";
+import {
+  getDatabase,
+  ref,
+  onValue,
+  goOffline,
+} from "firebase/database";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -10,67 +15,116 @@ const firebaseConfig = {
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  databaseURL:
+    import.meta.env.VITE_FIREBASE_DATABASE_URL ||
+    import.meta.env.VITE_RTDB_FIREBASE_DATABASE_URL,
 };
 
-const rtdbFirebaseConfig = {
-  apiKey: import.meta.env.VITE_RTDB_FIREBASE_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_RTDB_FIREBASE_AUTH_DOMAIN || import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  databaseURL: import.meta.env.VITE_RTDB_FIREBASE_DATABASE_URL || import.meta.env.VITE_FIREBASE_DATABASE_URL,
-  projectId: import.meta.env.VITE_RTDB_FIREBASE_PROJECT_ID || import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_RTDB_FIREBASE_STORAGE_BUCKET || import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_RTDB_FIREBASE_MESSAGING_SENDER_ID || import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_RTDB_FIREBASE_APP_ID || import.meta.env.VITE_FIREBASE_APP_ID
-};
+// --------------------------------------------------
+// Firebase App
+// --------------------------------------------------
 
 const app = initializeApp(firebaseConfig);
-const rtdbApp = initializeApp(rtdbFirebaseConfig, "RTDB_APP");
+
+// --------------------------------------------------
+// Authentication
+// --------------------------------------------------
 
 export const auth = getAuth(app);
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
+
+// --------------------------------------------------
+// Firestore
+// --------------------------------------------------
+
+// Use getFirestore instead of initializeFirestore.
+// This avoids Vite HMR errors when the module reloads.
+export const db = getFirestore(app);
+
+// --------------------------------------------------
+// Realtime Database
+// --------------------------------------------------
+
+// IMPORTANT:
+// RTDB now uses the SAME Firebase app as Authentication.
+export const rtdb = getDatabase(
+  app,
+  import.meta.env.VITE_FIREBASE_DATABASE_URL ||
+    import.meta.env.VITE_RTDB_FIREBASE_DATABASE_URL
+);
+console.log("🔥 FIREBASE CONFIG CHECK:", {
+  projectId: firebaseConfig.projectId,
+  databaseURL:
+    import.meta.env.VITE_FIREBASE_DATABASE_URL ||
+    import.meta.env.VITE_RTDB_FIREBASE_DATABASE_URL,
+  authProject: auth.app.options.projectId,
+  rtdbProject: rtdb.app.options.projectId
 });
-// Defer Analytics until after first paint — removes it from the critical path
+
+// --------------------------------------------------
+// Firebase Analytics
+// --------------------------------------------------
+
 let analytics = null;
-if (typeof window !== 'undefined') {
-  window.addEventListener('load', () => {
-    import('firebase/analytics').then(({ getAnalytics }) => {
-      analytics = getAnalytics(app);
-    });
-  }, { once: true });
+
+if (typeof window !== "undefined") {
+  window.addEventListener(
+    "load",
+    () => {
+      import("firebase/analytics")
+        .then(({ getAnalytics }) => {
+          analytics = getAnalytics(app);
+        })
+        .catch((error) => {
+          console.warn(
+            "Firebase Analytics initialization failed:",
+            error
+          );
+        });
+    },
+    { once: true }
+  );
 }
+
 export { analytics };
 
+// --------------------------------------------------
+// Server Time
+// --------------------------------------------------
 
-// ─── Server Time Sync via Firebase RTDB ───
 let _serverTimeOffset = 0;
 
-export const rtdb = getDatabase(rtdbApp);
-
-
 try {
-  // Start offline by default until entering an active room session
-  goOffline(rtdb);
-  const offsetRef = ref(rtdb, '.info/serverTimeOffset');
+  const offsetRef = ref(rtdb, ".info/serverTimeOffset");
+
   onValue(offsetRef, (snap) => {
     _serverTimeOffset = snap.val() || 0;
   });
-} catch (e) {
-  // RTDB sync skipped silently. We default to local machine clock.
+
+  // AuctionContext will call goOnline(rtdb)
+  // when an auction becomes active.
+  goOffline(rtdb);
+} catch (error) {
+  console.warn(
+    "Realtime Database initialization warning:",
+    error
+  );
 }
 
-/**
- * Returns the current server-authoritative time in milliseconds.
- * Uses Firebase RTDB's `.info/serverTimeOffset` for ms-accurate sync.
- * All clients calling this will agree on the same absolute time (±50ms).
- */
-export const getServerTime = () => Date.now() + _serverTimeOffset;
+// --------------------------------------------------
+// Server Time Helpers
+// --------------------------------------------------
 
-/**
- * Returns the current server time offset in ms (for debugging).
- */
-export const getServerTimeOffset = () => _serverTimeOffset;
+export const getServerTime = () => {
+  return Date.now() + _serverTimeOffset;
+};
+
+export const getServerTimeOffset = () => {
+  return _serverTimeOffset;
+};
+
+// --------------------------------------------------
+// Default Export
+// --------------------------------------------------
 
 export default app;

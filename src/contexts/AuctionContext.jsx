@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { db, getServerTime, rtdb } from '../lib/firebase';
-import { supabase } from '../lib/supabase';
+import { db, getServerTime, rtdb, auth } from '../lib/firebase';import { supabase } from '../lib/supabase';
 import { IPL_PLAYERS } from '../data/players';
 import { evaluateBotBid } from '../lib/botEngine';
 import { 
@@ -100,6 +99,12 @@ export const AuctionProvider = ({ children }) => {
     const budget = isSprint5 ? 60.0 : isSprint11 ? 90.0 : 120.0;
     const squadLimit = isSprint5 ? 5 : isSprint11 ? 11 : 25;
     const overseasLimit = isSprint5 ? 2 : isSprint11 ? 4 : 8;
+
+    console.log("🔥 AUTH CHECK:", {
+      uid: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      authenticated: !!auth.currentUser
+    });
 
     const liveRef = ref(rtdb, `auctions/${roomId}/live`);
     await set(liveRef, { status: 'waiting' });

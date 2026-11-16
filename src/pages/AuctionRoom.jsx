@@ -6,6 +6,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuction } from '../contexts/AuctionContext';
 import { useAuth } from '../contexts/AuthContext';
 import { IPL_PLAYERS } from '../data/players';
+import { calculateTeamRating } from '../lib/ratingEngine';
 import {
    Wallet,
    History,
@@ -104,50 +105,60 @@ const AuctionRoom = () => {
    const displayAuctionState = optimisticState || currentAuction?.currentAuction;
 
    // Real-time team ratings calculated entirely in browser memory (0 DB / infra cost)
+   // Rating now considers both player quality and auction purchase value.
    const liveTeamRatings = useMemo(() => {
-      const playerMap = new Map(IPL_PLAYERS.map(p => [p.id, p]));
       const ratingMap = {};
 
       TEAMS.forEach(team => {
          const teamDoc = roomTeams.find(doc => doc.teamId === team.id);
          const squad = teamDoc?.squad || [];
 
-         let totalRating = 0;
-         let ratedPlayersCount = 0;
-
-         squad.forEach(member => {
-            const pid = typeof member === 'string' ? member : member.id;
-            const pInfo = playerMap.get(pid);
-            if (pInfo?.rating) {
-               totalRating += pInfo.rating;
-               ratedPlayersCount += 1;
-            }
-         });
-
-         const avgRating = ratedPlayersCount > 0 ? (totalRating / ratedPlayersCount).toFixed(1) : null;
+         const ratingInfo = calculateTeamRating(squad);
 
          ratingMap[team.id] = {
-            totalRating,
-            avgRating,
+            totalRating: ratingInfo.totalRating,
+            avgRating: ratingInfo.playersEvaluated > 0
+               ? ratingInfo.avgRating
+               : null,
+            qualityRating: ratingInfo.qualityRating,
+            valueRating: ratingInfo.valueRating,
+            playersEvaluated: ratingInfo.playersEvaluated,
             playerCount: squad.length
          };
       });
 
-      // Sorted ranking descending by avgRating, then totalRating, then team name
+      // Sorted ranking:
+      // 1. Final auction-adjusted rating
+      // 2. Pure player quality
+      // 3. Auction-adjusted total rating
+      // 4. Team name
       const rankedTeams = [...TEAMS].sort((a, b) => {
-         const rA = ratingMap[a.id]?.avgRating ? parseFloat(ratingMap[a.id].avgRating) : 0;
-         const rB = ratingMap[b.id]?.avgRating ? parseFloat(ratingMap[b.id].avgRating) : 0;
-         if (rB !== rA) return rB - rA;
+         const rA = ratingMap[a.id]?.avgRating ?? 0;
+         const rB = ratingMap[b.id]?.avgRating ?? 0;
 
-         const tA = ratingMap[a.id]?.totalRating || 0;
-         const tB = ratingMap[b.id]?.totalRating || 0;
-         if (tB !== tA) return tB - tA;
+         if (rB !== rA) {
+            return rB - rA;
+         }
+
+         const qA = ratingMap[a.id]?.qualityRating ?? 0;
+         const qB = ratingMap[b.id]?.qualityRating ?? 0;
+
+         if (qB !== qA) {
+            return qB - qA;
+         }
+
+         const tA = ratingMap[a.id]?.totalRating ?? 0;
+         const tB = ratingMap[b.id]?.totalRating ?? 0;
+
+         if (tB !== tA) {
+            return tB - tA;
+         }
 
          return a.name.localeCompare(b.name);
       });
 
       return { ratingMap, rankedTeams };
-   }, [roomTeams, IPL_PLAYERS]);
+   }, [roomTeams]);
 
 
    // Audio unlocker for mobile devices

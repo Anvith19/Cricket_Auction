@@ -71,9 +71,17 @@ export const AuthProvider = ({ children }) => {
 
 
   const loginWithGoogle = async () => {
+  try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
-  };
+  } catch (error) {
+    console.error("🔥 Firebase Google Login Error");
+    console.error("Code:", error.code);
+    console.error("Message:", error.message);
+    console.error("Full error:", error);
+    throw error;
+  }
+};
 
   const loginAsGuest = async (displayName) => {
     const result = await signInAnonymously(auth);
