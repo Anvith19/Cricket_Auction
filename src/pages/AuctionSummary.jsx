@@ -160,13 +160,8 @@ const AuctionSummary = () => {
     return () => { isMounted = false; };
   }, [id]);
 
-  // Use context data only when it belongs to the room in this URL.
-  // This prevents a previously opened auction from overriding History's selected auction.
-  const contextAuctionMatches =
-    currentAuction?.id === id || currentAuction?.roomId === id;
-  const activeAuction = contextAuctionMatches ? currentAuction : dbAuction;
-  const activeTeams =
-    contextAuctionMatches && roomTeams?.length > 0 ? roomTeams : dbTeams;
+  const activeAuction = currentAuction || dbAuction;
+  const activeTeams = (roomTeams && roomTeams.length > 0) ? roomTeams : dbTeams;
 
   // Derived Data
   const allSoldPlayers = useMemo(() => {
