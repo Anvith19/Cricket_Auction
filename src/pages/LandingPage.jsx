@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useAuction } from '../contexts/AuctionContext';
 import { db, rtdb } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
-import { ref, onValue, get } from 'firebase/database';
+import { ref, onValue, get, remove } from 'firebase/database';
 import { collection, query, where, getDocs, doc, getDoc, documentId, limit, orderBy } from 'firebase/firestore';
 import { IPL_PLAYERS } from '../data/players';
 import { TEAMS } from '../data/teams';
@@ -242,6 +242,8 @@ const LandingPage = () => {
                 teamName: teamData.team_name,
                 budgetRemaining: teamData.budget_remaining,
                 spent,
+                status: auctionData?.status || 'completed',
+                mode: auctionData?.auction_type || 'mega',
                 squad: (teamData.squad || []).map(s => {
                   const pid = typeof s === 'string' ? s : s.id;
                   const bid = typeof s === 'string' ? 0 : s.bid;
@@ -288,30 +290,58 @@ const LandingPage = () => {
 
   // Delete individual session from Supabase history & public list
   const handleDeleteHistory = async (e, session) => {
-    e.stopPropagation(); // Prevent accordion toggle
-    if (!window.confirm(`Are you sure you want to delete room "${session.roomId}"?`)) return;
+    e.stopPropagation();
+
+    if (!window.confirm(`Are you sure you want to delete room "${session.roomId}"?`)) {
+      return;
+    }
 
     const roomId = session.roomId;
-    const teamDocId = session.id;
 
     try {
       if (supabase) {
-        // 1. Delete user's team row from Supabase
-        await supabase.from('teams').delete().eq('id', teamDocId);
-        // 2. Delete the auction room itself from Supabase
-        await supabase.from('auctions').delete().eq('id', roomId);
+        const { error: teamsDeleteError } = await supabase
+          .from('teams')
+          .delete()
+          .eq('auction_id', roomId);
+
+        if (teamsDeleteError) {
+          console.error('Failed to delete auction teams:', teamsDeleteError);
+          throw teamsDeleteError;
+        }
+
+        const { error: auctionDeleteError } = await supabase
+          .from('auctions')
+          .delete()
+          .eq('id', roomId);
+
+        if (auctionDeleteError) {
+          console.error('Failed to delete auction:', auctionDeleteError);
+          throw auctionDeleteError;
+        }
       }
 
-      // 3. Remove room from Realtime Database if still sitting in waiting state
       try {
         await remove(ref(rtdb, `auctions/${roomId}`));
-      } catch (rErr) { }
+      } catch (rtdbError) {
+        console.warn('RTDB cleanup failed:', rtdbError);
+      }
 
-      // 4. Immediately update local state for both History and Public Rooms
-      setHistoryData(prev => prev.filter(item => item.id !== teamDocId));
-      setPublicRooms(prev => prev.filter(room => room.roomId !== roomId));
+      setHistoryData(prev =>
+        prev.filter(item => item.roomId !== roomId)
+      );
+
+      setPublicRooms(prev =>
+        prev.filter(room => room.roomId !== roomId)
+      );
+
+      setExpandedSession(null);
     } catch (err) {
-      // Graceful delete failure
+      console.error('History deletion failed:', err);
+      alert(
+        err?.message ||
+        'Unable to delete this auction. Please try again.'
+      );
     }
   };
 
