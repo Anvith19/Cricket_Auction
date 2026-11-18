@@ -268,12 +268,11 @@ export function calculatePlayerAuctionRating(
     baseRating * 1.15;
 
   return Number(
-    clamp(
-      adjustedRating,
-      minimumRating,
-      maximumRating
-    ).toFixed(1)
-  );
+  Math.min(
+    100,
+    clamp(adjustedRating, baseRating * 0.82, baseRating * 1.15)
+  ).toFixed(1)
+);
 }
 
 /* =========================================================

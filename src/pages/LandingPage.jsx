@@ -4,8 +4,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useAuction } from '../contexts/AuctionContext';
 import { db, rtdb } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
-import { ref, onValue, get } from 'firebase/database';
-import { collection, query, where, getDocs, doc, getDoc, documentId, limit, orderBy } from 'firebase/firestore';
+import { ref, onValue, get, remove } from 'firebase/database';
+import { collection, query, where, getDocs, doc, getDoc, deleteDoc, documentId, limit, orderBy } from 'firebase/firestore';
 import { IPL_PLAYERS } from '../data/players';
 import { TEAMS } from '../data/teams';
 import {
@@ -242,6 +242,9 @@ const LandingPage = () => {
                 teamName: teamData.team_name,
                 budgetRemaining: teamData.budget_remaining,
                 spent,
+                // Auction status and mode are required by the History actions below.
+                status: auctionData?.status || 'completed',
+                mode: auctionData?.auction_type || 'mega',
                 squad: (teamData.squad || []).map(s => {
                   const pid = typeof s === 'string' ? s : s.id;
                   const bid = typeof s === 'string' ? 0 : s.bid;
@@ -286,32 +289,63 @@ const LandingPage = () => {
     });
   }, [publicRooms, searchQuery, filterMode]);
 
-  // Delete individual session from Supabase history & public list
+  // Delete the entire auction room and every team associated with it.
   const handleDeleteHistory = async (e, session) => {
-    e.stopPropagation(); // Prevent accordion toggle
-    if (!window.confirm(`Are you sure you want to delete room "${session.roomId}"?`)) return;
+    e.stopPropagation();
 
-    const roomId = session.roomId;
-    const teamDocId = session.id;
+    const roomId = session?.roomId;
+    if (!roomId) {
+      alert('Unable to identify this auction room. Please refresh and try again.');
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to permanently delete room \"${roomId}\" and all its teams?`)) {
+      return;
+    }
 
     try {
       if (supabase) {
-        // 1. Delete user's team row from Supabase
-        await supabase.from('teams').delete().eq('id', teamDocId);
-        // 2. Delete the auction room itself from Supabase
-        await supabase.from('auctions').delete().eq('id', roomId);
+        // Delete every team row first so the auction can be removed even when
+        // the database has a foreign-key relationship from teams to auctions.
+        const { error: teamsDeleteError } = await supabase
+          .from('teams')
+          .delete()
+          .eq('auction_id', roomId);
+
+        if (teamsDeleteError) throw teamsDeleteError;
+
+        const { error: auctionDeleteError } = await supabase
+          .from('auctions')
+          .delete()
+          .eq('id', roomId);
+
+        if (auctionDeleteError) throw auctionDeleteError;
+      } else {
+        // Legacy Firestore fallback when Supabase is not configured.
+        const teamsQuery = query(
+          collection(db, 'teams'),
+          where('auctionId', '==', roomId)
+        );
+        const teamsSnapshot = await getDocs(teamsQuery);
+        await Promise.all(teamsSnapshot.docs.map(teamDoc => deleteDoc(teamDoc.ref)));
+        await deleteDoc(doc(db, 'auctions', roomId));
       }
 
-      // 3. Remove room from Realtime Database if still sitting in waiting state
+      // RTDB may already have been cleaned up after a completed auction.
+      // Its cleanup should not undo a successful persistent-store deletion.
       try {
         await remove(ref(rtdb, `auctions/${roomId}`));
-      } catch (rErr) { }
+      } catch (rtdbError) {
+        console.warn('Realtime Database cleanup failed:', rtdbError);
+      }
 
-      // 4. Immediately update local state for both History and Public Rooms
-      setHistoryData(prev => prev.filter(item => item.id !== teamDocId));
+      // Only update the UI after the persistent deletion has succeeded.
+      setHistoryData(prev => prev.filter(item => item.roomId !== roomId));
       setPublicRooms(prev => prev.filter(room => room.roomId !== roomId));
+      setExpandedSession(null);
     } catch (err) {
-      // Graceful delete failure
+      console.error('Auction history deletion failed:', err);
+      alert(err?.message || 'Unable to delete this auction. Please check your database permissions and try again.');
     }
   };
 
@@ -1124,7 +1158,10 @@ const LandingPage = () => {
                                       {/* View Full Summary / Resume Auction Button */}
                                       {session.status === 'completed' ? (
                                         <button
-                                          onClick={() => navigate(`/summary/${session.roomId}`)}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            navigate(`/summary/${session.roomId}`);
+                                          }}
                                           className="w-full mt-2 py-2.5 sm:py-3 bg-blue-600/10 border border-blue-500/20 rounded-xl text-blue-500 text-[9px] sm:text-[10px] font-black uppercase tracking-widest hover:bg-blue-600/20 transition-all cursor-pointer flex items-center justify-center gap-2"
                                         >
                                           <Trophy size={12} /> View Full Summary
