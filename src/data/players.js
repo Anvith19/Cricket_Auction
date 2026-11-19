@@ -177,7 +177,7 @@ export const IPL_PLAYERS = [
       "sr": 149.73,
       "hs": "124*"
     },
-    "rating": 91
+    "rating": 27
   },
   {
     "id": "p_109",
@@ -375,7 +375,7 @@ export const IPL_PLAYERS = [
       "sr": 164.09,
       "hs": "87*"
     },
-    "rating": 87
+    "rating": 17
   },
   {
     "id": "p_122",
@@ -447,7 +447,7 @@ export const IPL_PLAYERS = [
       "avg": 23.92,
       "bb": "4/24"
     },
-    "rating": 89
+    "rating": 19
   },
   {
     "id": "p_126",
